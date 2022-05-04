@@ -1,0 +1,110 @@
+version: "2.2"
+
+services:
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    volumes:
+      - ./tmp/certs:/usr/share/elasticsearch/config/certs
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=certs/elasticsearch/elasticsearch.key
+      - xpack.security.http.ssl.certificate=certs/elasticsearch/elasticsearch.crt
+      - xpack.security.http.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.http.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.key=certs/elasticsearch/elasticsearch.key
+      - xpack.security.transport.ssl.certificate=certs/elasticsearch/elasticsearch.crt
+      - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.license.self_generated.type=${LICENSE}
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s --cacert config/certs/ca/ca.crt https://elasticsearch:9200 | grep -q 'missing authentication credentials'",
+        ]
+      interval: 1s
+      timeout: 1s
+      retries: 120
+
+  kibana_user_creator:
+    # Этот контейнер нужен только для того, чтобы создать юзера для Кибаны. Другого нормального варианта не придумал.
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    volumes:
+      - ./tmp/certs:/usr/share/elasticsearch/config/certs
+    command: >
+      bash -c '
+      echo "Check elastic start";
+      until curl -s --cacert config/certs/ca/ca.crt https://elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+      echo "Setting kibana_system password";
+      until curl -s -X POST --cacert config/certs/ca/ca.crt -u elastic:${ELASTIC_PASSWORD} -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;
+      echo "All done!";
+      '
+
+  kibana:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana_user_creator:
+        condition: service_started
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
+    volumes:
+      - ./tmp/certs:/usr/share/kibana/config/certs
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+    ports:
+      - "5601:5601"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -I http://kibana:5601 | grep -q 'HTTP/1.1 302 Found'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  logstash:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana:
+        condition: service_healthy
+    image: docker.elastic.co/logstash/logstash:${STACK_VERSION}
+    volumes:
+      - ./tmp/certs:/etc/logstash/config/certs
+      - ./tmp/logstash_config/logstash.conf:/etc/logstash/conf.d/logstash.conf
+#      - ./tmp/logstash_config/logstash.yml:/etc/logstash/logstash.yml
+    environment:
+      - node.name=logstash
+      - path.config=/etc/logstash/conf.d/*.conf
+      - pipeline.batch.size=125
+      - pipeline.batch.delay=50
+      - xpack.monitoring.enabled=true
+      - xpack.monitoring.elasticsearch.username=logstash_system
+      - xpack.monitoring.elasticsearch.password=${LOGSTASH_PASSWORD}
+      - xpack.monitoring.elasticsearch.hosts=https://elasticsearch:9200
+      - xpack.monitoring.elasticsearch.ssl.certificate_authority=/etc/logstash/config/certs/ca/ca.crt
+    ports:
+      - "5044:5044/udp"
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
+    volumes:
+      - ./filebeat/config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./tmp/certs/ca:/etc/filebeat/config/certs/ca
+      - ./filebeat/test_logs:/var/log/test
+
