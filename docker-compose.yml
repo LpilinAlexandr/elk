@@ -21,8 +21,8 @@ services:
       - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=${LICENSE}
-    ports:
-      - "9200:9200"
+#    ports:
+#      - "9200:9200"
     healthcheck:
       test:
         [
@@ -87,7 +87,6 @@ services:
     volumes:
       - ./tmp/certs:/etc/logstash/config/certs
       - ./tmp/logstash_config/logstash.conf:/etc/logstash/conf.d/logstash.conf
-#      - ./tmp/logstash_config/logstash.yml:/etc/logstash/logstash.yml
     environment:
       - node.name=logstash
       - path.config=/etc/logstash/conf.d/*.conf
@@ -101,10 +100,10 @@ services:
     ports:
       - "5044:5044/udp"
 
-  filebeat:
-    image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
-    volumes:
-      - ./filebeat/config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - ./tmp/certs/ca:/etc/filebeat/config/certs/ca
-      - ./filebeat/test_logs:/var/log/test
+#  filebeat:
+#    image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
+#    volumes:
+#      - ./filebeat/config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+#      - ./tmp/certs/ca:/etc/filebeat/config/certs/ca
+#      - ./filebeat/test_logs:/var/log/test
 
